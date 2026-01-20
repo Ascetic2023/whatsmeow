@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(xargs -I {} sh -c 'echo \"\"=== {} ===\"\" && head -20 \"\"{}\"\"')",
+      "Bash(find:*)",
+      "Bash(git -C \"e:\\\\work\\\\whatsmeow\" log --oneline -20)",
+      "Bash(git -C \"e:\\\\work\\\\whatsmeow\" config:*)",
+      "Bash(go build:*)",
+      "Bash(go test:*)"
+    ]
+  }
+}

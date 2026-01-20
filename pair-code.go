@@ -11,7 +11,6 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/sha256"
-	"encoding/base32"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -45,7 +44,6 @@ const (
 )
 
 var notNumbers = regexp.MustCompile("[^0-9]")
-var linkingBase32 = base32.NewEncoding("123456789ABCDEFGHJKLMNPQRSTVWXYZ")
 
 type phoneLinkingCache struct {
 	jid         types.JID
@@ -59,7 +57,9 @@ func generateCompanionEphemeralKey() (ephemeralKeyPair *keys.KeyPair, ephemeralK
 	salt := random.Bytes(32)
 	iv := random.Bytes(16)
 	linkingCode := random.Bytes(5)
-	encodedLinkingCode = linkingBase32.EncodeToString(linkingCode)
+	// 将 5 字节转换为 8 位纯数字码 (00000000-99999999)
+	num := uint64(linkingCode[0])<<32 | uint64(linkingCode[1])<<24 | uint64(linkingCode[2])<<16 | uint64(linkingCode[3])<<8 | uint64(linkingCode[4])
+	encodedLinkingCode = fmt.Sprintf("%08d", num%100000000)
 	linkCodeKey := pbkdf2.Key([]byte(encodedLinkingCode), salt, 2<<16, 32, sha256.New)
 	linkCipherBlock, _ := aes.NewCipher(linkCodeKey)
 	encryptedPubkey := ephemeralKeyPair.Pub[:]
@@ -137,7 +137,7 @@ func (cli *Client) PairPhone(ctx context.Context, phone string, showPushNotifica
 		linkingCode: encodedLinkingCode,
 		pairingRef:  string(pairingRef),
 	}
-	return encodedLinkingCode[0:4] + "-" + encodedLinkingCode[4:], nil
+	return encodedLinkingCode[0:4] + "-" + encodedLinkingCode[4:8], nil
 }
 
 func (cli *Client) tryHandleCodePairNotification(ctx context.Context, parentNode *waBinary.Node) {
