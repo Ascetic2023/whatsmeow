@@ -7,7 +7,13 @@
       "Bash(git -C \"e:\\\\work\\\\whatsmeow\" log --oneline -20)",
       "Bash(git -C \"e:\\\\work\\\\whatsmeow\" config:*)",
       "Bash(go build:*)",
-      "Bash(go test:*)"
+      "Bash(go test:*)",
+      "Bash(git remote add:*)",
+      "Bash(git fetch:*)",
+      "Bash(git rebase:*)",
+      "Bash(git stash:*)",
+      "Bash(git push:*)",
+      "Bash(git check-ignore:*)"
     ]
   }
 }

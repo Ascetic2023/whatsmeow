@@ -152,6 +152,8 @@ type SendRequestExtra struct {
 	Timeout time.Duration
 	// When sending media to newsletters, the Handle field returned by the file upload.
 	MediaHandle string
+	// SkipOwnDevices skips sending the message to your own devices (no sync to other logged-in devices)
+	SkipOwnDevices bool
 
 	Meta *types.MsgMetaInfo
 	// use this only if you know what you are doing
@@ -396,7 +398,7 @@ func (cli *Client) SendMessage(ctx context.Context, to types.JID, message *waE2E
 		if req.Peer {
 			data, err = cli.sendPeerMessage(ctx, to, req.ID, message, &resp.DebugTimings)
 		} else {
-			phash, data, err = cli.sendDM(ctx, ownID, to, req.ID, message, &resp.DebugTimings, extraParams)
+			phash, data, err = cli.sendDM(ctx, ownID, to, req.ID, message, &resp.DebugTimings, extraParams, req.SkipOwnDevices)
 		}
 	case types.NewsletterServer:
 		data, err = cli.sendNewsletter(ctx, to, req.ID, message, req.MediaHandle, &resp.DebugTimings)
@@ -833,6 +835,7 @@ func (cli *Client) sendDM(
 	message *waE2E.Message,
 	timings *MessageDebugTimings,
 	extraParams nodeExtraParams,
+	skipOwnDevices bool,
 ) (string, []byte, error) {
 	start := time.Now()
 	messagePlaintext, deviceSentMessagePlaintext, err := marshalMessage(to, message)
@@ -841,8 +844,16 @@ func (cli *Client) sendDM(
 		return "", nil, err
 	}
 
+	var participants []types.JID
+	if skipOwnDevices {
+		participants = []types.JID{to}
+		deviceSentMessagePlaintext = nil
+	} else {
+		participants = []types.JID{to, ownID.ToNonAD()}
+	}
+
 	node, allDevices, err := cli.prepareMessageNode(
-		ctx, to, id, message, []types.JID{to, ownID.ToNonAD()},
+		ctx, to, id, message, participants,
 		messagePlaintext, deviceSentMessagePlaintext, timings, extraParams,
 	)
 	if err != nil {

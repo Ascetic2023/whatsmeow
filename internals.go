@@ -659,8 +659,8 @@ func (int *DangerousInternalClient) SendPeerMessage(ctx context.Context, to type
 	return int.c.sendPeerMessage(ctx, to, id, message, timings)
 }
 
-func (int *DangerousInternalClient) SendDM(ctx context.Context, ownID, to types.JID, id types.MessageID, message *waE2E.Message, timings *MessageDebugTimings, extraParams nodeExtraParams) (string, []byte, error) {
-	return int.c.sendDM(ctx, ownID, to, id, message, timings, extraParams)
+func (int *DangerousInternalClient) SendDM(ctx context.Context, ownID, to types.JID, id types.MessageID, message *waE2E.Message, timings *MessageDebugTimings, extraParams nodeExtraParams, skipOwnDevices bool) (string, []byte, error) {
+	return int.c.sendDM(ctx, ownID, to, id, message, timings, extraParams, skipOwnDevices)
 }
 
 func (int *DangerousInternalClient) PreparePeerMessageNode(ctx context.Context, to types.JID, id types.MessageID, message *waE2E.Message, timings *MessageDebugTimings) (*waBinary.Node, error) {
