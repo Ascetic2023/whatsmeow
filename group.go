@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	waBinary "go.mau.fi/whatsmeow/binary"
 	"go.mau.fi/whatsmeow/store"
@@ -19,6 +20,14 @@ import (
 )
 
 const InviteLinkPrefix = "https://chat.whatsapp.com/"
+
+// PrivacyTokenExpireDuration is the validity period for privacy tokens (7 days, based on WhatsApp Web behavior)
+const PrivacyTokenExpireDuration = 7 * 24 * time.Hour
+
+// IsPrivacyTokenExpired checks if a privacy token has expired
+func IsPrivacyTokenExpired(timestamp time.Time) bool {
+	return time.Since(timestamp) > PrivacyTokenExpireDuration
+}
 
 func (cli *Client) sendGroupIQ(ctx context.Context, iqType infoQueryType, jid types.JID, content waBinary.Node) (*waBinary.Node, error) {
 	return cli.sendIQ(ctx, infoQuery{
@@ -199,6 +208,23 @@ func (cli *Client) UpdateGroupParticipants(ctx context.Context, jid types.JID, p
 				return nil, fmt.Errorf("failed to get phone number for LID %s: %v", participantJID, err)
 			} else if !pn.IsEmpty() {
 				content[i].Attrs["phone_number"] = pn
+			}
+		}
+		// Attach valid privacy token when adding participants (mimics WhatsApp Web behavior)
+		if action == ParticipantChangeAdd {
+			pt, err := cli.Store.PrivacyTokens.GetPrivacyToken(ctx, participantJID)
+			if err != nil {
+				cli.Log.Warnf("Failed to get privacy token for %s: %v", participantJID, err)
+			} else if pt != nil {
+				// Only attach token if not expired
+				if !IsPrivacyTokenExpired(pt.Timestamp) {
+					content[i].Content = []waBinary.Node{{
+						Tag:     "privacy",
+						Content: pt.Token,
+					}}
+				} else {
+					cli.Log.Debugf("Privacy token expired for %s", participantJID)
+				}
 			}
 		}
 	}
