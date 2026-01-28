@@ -210,23 +210,6 @@ func (cli *Client) UpdateGroupParticipants(ctx context.Context, jid types.JID, p
 				content[i].Attrs["phone_number"] = pn
 			}
 		}
-		// Attach valid privacy token when adding participants (mimics WhatsApp Web behavior)
-		if action == ParticipantChangeAdd {
-			pt, err := cli.Store.PrivacyTokens.GetPrivacyToken(ctx, participantJID)
-			if err != nil {
-				cli.Log.Warnf("Failed to get privacy token for %s: %v", participantJID, err)
-			} else if pt != nil {
-				// Only attach token if not expired
-				if !IsPrivacyTokenExpired(pt.Timestamp) {
-					content[i].Content = []waBinary.Node{{
-						Tag:     "privacy",
-						Content: pt.Token,
-					}}
-				} else {
-					cli.Log.Debugf("Privacy token expired for %s", participantJID)
-				}
-			}
-		}
 	}
 	resp, err := cli.sendGroupIQ(ctx, iqSet, jid, waBinary.Node{
 		Tag:     string(action),
