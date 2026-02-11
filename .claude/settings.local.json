@@ -14,7 +14,8 @@
       "Bash(git stash:*)",
       "Bash(git push:*)",
       "Bash(git check-ignore:*)",
-      "Bash(git merge:*)"
+      "Bash(git merge:*)",
+      "Bash(go doc:*)"
     ]
   }
 }

@@ -855,7 +855,6 @@ func (cli *Client) sendDM(
 	var participants []types.JID
 	if skipOwnDevices {
 		participants = []types.JID{to}
-		deviceSentMessagePlaintext = nil
 	} else {
 		participants = []types.JID{to, ownID.ToNonAD()}
 	}
