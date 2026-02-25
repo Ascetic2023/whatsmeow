@@ -965,6 +965,18 @@ func getMediaTypeFromMessage(msg *waE2E.Message) string {
 		return "order"
 	case msg.ProductMessage != nil:
 		return "product"
+	case msg.InteractiveMessage != nil:
+		h := msg.InteractiveMessage.GetHeader()
+		switch {
+		case h.GetImageMessage() != nil:
+			return "image"
+		case h.GetVideoMessage() != nil:
+			return "video"
+		case h.GetDocumentMessage() != nil:
+			return "document"
+		default:
+			return ""
+		}
 	case msg.InteractiveResponseMessage != nil:
 		return "native_flow_response"
 	default:
@@ -988,6 +1000,8 @@ func getButtonTypeFromMessage(msg *waE2E.Message) string {
 		return "list"
 	case msg.ListResponseMessage != nil:
 		return "list_response"
+	case msg.InteractiveMessage != nil:
+		return "interactive"
 	case msg.InteractiveResponseMessage != nil:
 		return "interactive_response"
 	default:
@@ -1004,6 +1018,8 @@ func getButtonAttributes(msg *waE2E.Message) waBinary.Attrs {
 	case msg.EphemeralMessage != nil:
 		return getButtonAttributes(msg.EphemeralMessage.Message)
 	case msg.TemplateMessage != nil:
+		return waBinary.Attrs{}
+	case msg.InteractiveMessage != nil:
 		return waBinary.Attrs{}
 	case msg.ListMessage != nil:
 		return waBinary.Attrs{

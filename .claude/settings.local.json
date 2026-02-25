@@ -15,7 +15,11 @@
       "Bash(git push:*)",
       "Bash(git check-ignore:*)",
       "Bash(git merge:*)",
-      "Bash(go doc:*)"
+      "Bash(go doc:*)",
+      "Bash(grep -n \"BuildUnavailableMessageRequest\\\\|immediateRequestMessageFromPhone\\\\|view_once\" /e/work/whatsmeow/*.go)",
+      "Bash(grep -n \"handleDecryptedMessage\\\\|handleDecryptedArmadillo\" /e/work/whatsmeow/*.go)",
+      "Bash(grep -n \"processProtocolParts\" /e/work/whatsmeow/*.go)",
+      "Bash(grep -n \"handleProtocolMessage\" /e/work/whatsmeow/*.go)"
     ]
   }
 }
