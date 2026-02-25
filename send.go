@@ -375,10 +375,12 @@ func (cli *Client) SendMessage(ctx context.Context, to types.JID, message *waE2E
 	resp.DebugTimings.Queue = time.Since(start)
 	defer cli.messageSendLock.Unlock()
 
-	respChan := cli.waitResponse(req.ID)
 	// Peer message retries aren't implemented yet
 	if !req.Peer {
-		cli.addRecentMessage(to, req.ID, message, nil)
+		err = cli.addRecentMessage(ctx, to, req.ID, message, nil)
+		if err != nil {
+			return
+		}
 	}
 
 	if message.GetMessageContextInfo().GetMessageSecret() != nil {
@@ -389,6 +391,8 @@ func (cli *Client) SendMessage(ctx context.Context, to types.JID, message *waE2E
 			cli.Log.Debugf("Stored message secret key for outgoing message %s", req.ID)
 		}
 	}
+
+	respChan := cli.waitResponse(req.ID)
 	var phash string
 	var data []byte
 	switch to.Server {
