@@ -45,6 +45,12 @@ const (
 
 var notNumbers = regexp.MustCompile("[^0-9]")
 
+type pendingPairCode struct {
+	keyPair      *keys.KeyPair
+	ephemeralKey []byte
+	linkingCode  string
+}
+
 type phoneLinkingCache struct {
 	jid         types.JID
 	keyPair     *keys.KeyPair
@@ -71,7 +77,89 @@ func generateCompanionEphemeralKey() (ephemeralKeyPair *keys.KeyPair, ephemeralK
 	return
 }
 
-// PairPhone generates a pairing code that can be used to link to a phone without scanning a QR code.
+// GeneratePairCode generates a pairing code locally without any network calls.
+// The code is stored internally and can later be sent to the server with [Client.SendPairCode].
+// This allows you to display the code to the user before registering it with the server.
+//
+// Returns the formatted pairing code (XXXX-XXXX).
+func (cli *Client) GeneratePairCode() (string, error) {
+	if cli == nil {
+		return "", ErrClientIsNil
+	}
+	ephemeralKeyPair, ephemeralKey, encodedLinkingCode := generateCompanionEphemeralKey()
+	cli.pendingPairCode = &pendingPairCode{
+		keyPair:      ephemeralKeyPair,
+		ephemeralKey: ephemeralKey,
+		linkingCode:  encodedLinkingCode,
+	}
+	return encodedLinkingCode[0:4] + "-" + encodedLinkingCode[4:8], nil
+}
+
+// SendPairCode sends a previously generated pairing code (from [Client.GeneratePairCode]) to the server.
+//
+// You must connect the client and wait for `*events.QR` before calling this.
+// The pairing code has a ~160-second time limit from the WebSocket connection.
+//
+// See [Client.PairPhone] for a convenience method that generates and sends in one call.
+func (cli *Client) SendPairCode(ctx context.Context, phone string, showPushNotification bool, clientType PairClientType, clientDisplayName string) error {
+	if cli == nil {
+		return ErrClientIsNil
+	}
+	pending := cli.pendingPairCode
+	if pending == nil {
+		return fmt.Errorf("no pending pair code, call GeneratePairCode first")
+	}
+	phone = notNumbers.ReplaceAllString(phone, "")
+	if len(phone) <= 6 {
+		return ErrPhoneNumberTooShort
+	} else if strings.HasPrefix(phone, "0") {
+		return ErrPhoneNumberIsNotInternational
+	}
+	jid := types.NewJID(phone, types.DefaultUserServer)
+	resp, err := cli.sendIQ(ctx, infoQuery{
+		Namespace: "md",
+		Type:      iqSet,
+		To:        types.ServerJID,
+		Content: []waBinary.Node{{
+			Tag: "link_code_companion_reg",
+			Attrs: waBinary.Attrs{
+				"jid":   jid,
+				"stage": "companion_hello",
+
+				"should_show_push_notification": strconv.FormatBool(showPushNotification),
+			},
+			Content: []waBinary.Node{
+				{Tag: "link_code_pairing_wrapped_companion_ephemeral_pub", Content: pending.ephemeralKey},
+				{Tag: "companion_server_auth_key_pub", Content: cli.Store.NoiseKey.Pub[:]},
+				{Tag: "companion_platform_id", Content: strconv.Itoa(int(clientType))},
+				{Tag: "companion_platform_display", Content: clientDisplayName},
+				{Tag: "link_code_pairing_nonce", Content: []byte{0}},
+			},
+		}},
+	})
+	if err != nil {
+		return err
+	}
+	pairingRefNode, ok := resp.GetOptionalChildByTag("link_code_companion_reg", "link_code_pairing_ref")
+	if !ok {
+		return &ElementMissingError{Tag: "link_code_pairing_ref", In: "code link registration response"}
+	}
+	pairingRef, ok := pairingRefNode.Content.([]byte)
+	if !ok {
+		return fmt.Errorf("unexpected type %T in content of link_code_pairing_ref tag", pairingRefNode.Content)
+	}
+	cli.phoneLinkingCache = &phoneLinkingCache{
+		jid:         jid,
+		keyPair:     pending.keyPair,
+		linkingCode: pending.linkingCode,
+		pairingRef:  string(pairingRef),
+	}
+	cli.pendingPairCode = nil
+	return nil
+}
+
+// PairPhone generates a pairing code and sends it to the server in one call.
+// This is a convenience method that calls [Client.GeneratePairCode] followed by [Client.SendPairCode].
 //
 // You must connect the client normally before calling this (which means you'll also receive a QR code
 // event, but that can be ignored when doing code pairing). You should also wait for `*events.QR` before
@@ -88,56 +176,15 @@ func generateCompanionEphemeralKey() (ephemeralKeyPair *keys.KeyPair, ephemeralK
 //
 // See https://faq.whatsapp.com/1324084875126592 for more info
 func (cli *Client) PairPhone(ctx context.Context, phone string, showPushNotification bool, clientType PairClientType, clientDisplayName string) (string, error) {
-	if cli == nil {
-		return "", ErrClientIsNil
-	}
-	ephemeralKeyPair, ephemeralKey, encodedLinkingCode := generateCompanionEphemeralKey()
-	phone = notNumbers.ReplaceAllString(phone, "")
-	if len(phone) <= 6 {
-		return "", ErrPhoneNumberTooShort
-	} else if strings.HasPrefix(phone, "0") {
-		return "", ErrPhoneNumberIsNotInternational
-	}
-	jid := types.NewJID(phone, types.DefaultUserServer)
-	resp, err := cli.sendIQ(ctx, infoQuery{
-		Namespace: "md",
-		Type:      iqSet,
-		To:        types.ServerJID,
-		Content: []waBinary.Node{{
-			Tag: "link_code_companion_reg",
-			Attrs: waBinary.Attrs{
-				"jid":   jid,
-				"stage": "companion_hello",
-
-				"should_show_push_notification": strconv.FormatBool(showPushNotification),
-			},
-			Content: []waBinary.Node{
-				{Tag: "link_code_pairing_wrapped_companion_ephemeral_pub", Content: ephemeralKey},
-				{Tag: "companion_server_auth_key_pub", Content: cli.Store.NoiseKey.Pub[:]},
-				{Tag: "companion_platform_id", Content: strconv.Itoa(int(clientType))},
-				{Tag: "companion_platform_display", Content: clientDisplayName},
-				{Tag: "link_code_pairing_nonce", Content: []byte{0}},
-			},
-		}},
-	})
+	code, err := cli.GeneratePairCode()
 	if err != nil {
 		return "", err
 	}
-	pairingRefNode, ok := resp.GetOptionalChildByTag("link_code_companion_reg", "link_code_pairing_ref")
-	if !ok {
-		return "", &ElementMissingError{Tag: "link_code_pairing_ref", In: "code link registration response"}
+	err = cli.SendPairCode(ctx, phone, showPushNotification, clientType, clientDisplayName)
+	if err != nil {
+		return "", err
 	}
-	pairingRef, ok := pairingRefNode.Content.([]byte)
-	if !ok {
-		return "", fmt.Errorf("unexpected type %T in content of link_code_pairing_ref tag", pairingRefNode.Content)
-	}
-	cli.phoneLinkingCache = &phoneLinkingCache{
-		jid:         jid,
-		keyPair:     ephemeralKeyPair,
-		linkingCode: encodedLinkingCode,
-		pairingRef:  string(pairingRef),
-	}
-	return encodedLinkingCode[0:4] + "-" + encodedLinkingCode[4:8], nil
+	return code, nil
 }
 
 func (cli *Client) tryHandleCodePairNotification(ctx context.Context, parentNode *waBinary.Node) {

@@ -175,6 +175,7 @@ type Client struct {
 
 	BackgroundEventCtx context.Context
 
+	pendingPairCode   *pendingPairCode
 	phoneLinkingCache *phoneLinkingCache
 
 	uniqueID  string
