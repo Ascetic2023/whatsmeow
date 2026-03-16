@@ -45,6 +45,9 @@ const (
 
 var notNumbers = regexp.MustCompile("[^0-9]")
 
+// ErrInvalidPairCode is returned when a custom pair code has an invalid format.
+var ErrInvalidPairCode = fmt.Errorf("pair code must be exactly 8 digits (e.g. 77778888 or 7777-8888)")
+
 type pendingPairCode struct {
 	keyPair      *keys.KeyPair
 	ephemeralKey []byte
@@ -58,14 +61,28 @@ type phoneLinkingCache struct {
 	pairingRef  string
 }
 
-func generateCompanionEphemeralKey() (ephemeralKeyPair *keys.KeyPair, ephemeralKey []byte, encodedLinkingCode string) {
+// normalizePairCode strips dashes and validates that the code is exactly 8 digits.
+// Returns the normalized 8-digit string or an error.
+func normalizePairCode(code string) (string, error) {
+	digits := notNumbers.ReplaceAllString(code, "")
+	if len(digits) != 8 {
+		return "", ErrInvalidPairCode
+	}
+	return digits, nil
+}
+
+func generateCompanionEphemeralKey(customCode string) (ephemeralKeyPair *keys.KeyPair, ephemeralKey []byte, encodedLinkingCode string) {
 	ephemeralKeyPair = keys.NewKeyPair()
 	salt := random.Bytes(32)
 	iv := random.Bytes(16)
-	linkingCode := random.Bytes(5)
-	// 将 5 字节转换为 8 位纯数字码 (00000000-99999999)
-	num := uint64(linkingCode[0])<<32 | uint64(linkingCode[1])<<24 | uint64(linkingCode[2])<<16 | uint64(linkingCode[3])<<8 | uint64(linkingCode[4])
-	encodedLinkingCode = fmt.Sprintf("%08d", num%100000000)
+	if customCode != "" {
+		encodedLinkingCode = customCode
+	} else {
+		linkingCode := random.Bytes(5)
+		// 将 5 字节转换为 8 位纯数字码 (00000000-99999999)
+		num := uint64(linkingCode[0])<<32 | uint64(linkingCode[1])<<24 | uint64(linkingCode[2])<<16 | uint64(linkingCode[3])<<8 | uint64(linkingCode[4])
+		encodedLinkingCode = fmt.Sprintf("%08d", num%100000000)
+	}
 	linkCodeKey := pbkdf2.Key([]byte(encodedLinkingCode), salt, 2<<16, 32, sha256.New)
 	linkCipherBlock, _ := aes.NewCipher(linkCodeKey)
 	encryptedPubkey := ephemeralKeyPair.Pub[:]
@@ -81,12 +98,23 @@ func generateCompanionEphemeralKey() (ephemeralKeyPair *keys.KeyPair, ephemeralK
 // The code is stored internally and can later be sent to the server with [Client.SendPairCode].
 // This allows you to display the code to the user before registering it with the server.
 //
+// An optional custom code can be provided (e.g. "7777-8888" or "77778888").
+// It must be exactly 8 digits. If omitted or empty, a random code is generated.
+//
 // Returns the formatted pairing code (XXXX-XXXX).
-func (cli *Client) GeneratePairCode() (string, error) {
+func (cli *Client) GeneratePairCode(customCode ...string) (string, error) {
 	if cli == nil {
 		return "", ErrClientIsNil
 	}
-	ephemeralKeyPair, ephemeralKey, encodedLinkingCode := generateCompanionEphemeralKey()
+	var normalized string
+	if len(customCode) > 0 && customCode[0] != "" {
+		var err error
+		normalized, err = normalizePairCode(customCode[0])
+		if err != nil {
+			return "", err
+		}
+	}
+	ephemeralKeyPair, ephemeralKey, encodedLinkingCode := generateCompanionEphemeralKey(normalized)
 	cli.pendingPairCode = &pendingPairCode{
 		keyPair:      ephemeralKeyPair,
 		ephemeralKey: ephemeralKey,
