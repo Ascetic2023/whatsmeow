@@ -158,8 +158,14 @@ func ImportTransferCode(code string) (*Device, error) {
 	// Generate SignedPreKey (signed by IdentityKey)
 	device.SignedPreKey = device.IdentityKey.CreateSignedPreKey(preKeyID)
 
-	// Empty Account — not needed for login, only used during initial pairing HMAC verification
-	device.Account = &waAdv.ADVSignedDeviceIdentity{}
+	// Empty Account with zero-filled fields matching DB NOT NULL + CHECK length constraints.
+	// Not needed for login, only used during initial pairing HMAC verification.
+	device.Account = &waAdv.ADVSignedDeviceIdentity{
+		Details:             []byte{},
+		AccountSignatureKey: make([]byte, 32),
+		AccountSignature:    make([]byte, 64),
+		DeviceSignature:     make([]byte, 64),
+	}
 
 	return device, nil
 }
