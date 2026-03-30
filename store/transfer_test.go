@@ -9,12 +9,8 @@ package store
 import (
 	"bytes"
 	"encoding/base64"
-	"encoding/binary"
-	"hash/crc32"
 	"strings"
 	"testing"
-
-	"github.com/google/uuid"
 
 	"go.mau.fi/whatsmeow/proto/waAdv"
 	"go.mau.fi/whatsmeow/types"
@@ -26,8 +22,6 @@ func makeTestDevice() *Device {
 	identityKey := keys.NewKeyPair()
 	signedPreKey := identityKey.CreateSignedPreKey(42)
 	jid := types.JID{User: "8613800138000", Device: 2, Server: types.DefaultUserServer}
-	lid := types.JID{User: "123456", Device: 1, Server: types.HiddenUserServer}
-	advDetails := []byte{10, 2, 8, 1, 16, 100, 24, 1}
 
 	return &Device{
 		NoiseKey:       noiseKey,
@@ -36,30 +30,29 @@ func makeTestDevice() *Device {
 		RegistrationID: 12345,
 		AdvSecretKey:   bytes.Repeat([]byte{0xAB}, 32),
 		ID:             &jid,
-		LID:            lid,
 		Account: &waAdv.ADVSignedDeviceIdentity{
-			Details:             advDetails,
+			Details:             []byte{10, 2, 8, 1},
 			AccountSignatureKey: bytes.Repeat([]byte{0xCC}, 32),
 			AccountSignature:    bytes.Repeat([]byte{0xDD}, 64),
 			DeviceSignature:     bytes.Repeat([]byte{0xEE}, 64),
 		},
-		Platform:              "Chrome (Linux)",
-		FacebookUUID:          uuid.MustParse("550e8400-e29b-41d4-a716-446655440000"),
-		LIDMigrationTimestamp: 1711612800,
 	}
 }
 
-func TestExportImportTransferCode(t *testing.T) {
+func TestExportImportRoundTrip(t *testing.T) {
 	original := makeTestDevice()
 	code, err := ExportTransferCode(original)
 	if err != nil {
 		t.Fatalf("ExportTransferCode failed: %v", err)
 	}
 
-	// Verify six-segment format
-	segments := splitTransferCode(code)
+	// Verify comma-separated six-segment format
+	segments := strings.Split(code, ",")
 	if len(segments) != 6 {
 		t.Fatalf("expected 6 segments, got %d", len(segments))
+	}
+	if segments[0] != "8613800138000" {
+		t.Errorf("segment 1: expected phone number, got %q", segments[0])
 	}
 
 	restored, err := ImportTransferCode(code)
@@ -67,69 +60,131 @@ func TestExportImportTransferCode(t *testing.T) {
 		t.Fatalf("ImportTransferCode failed: %v", err)
 	}
 
-	// Compare keys
+	// NoiseKey round-trip
+	if *restored.NoiseKey.Pub != *original.NoiseKey.Pub {
+		t.Error("NoiseKey public key mismatch")
+	}
 	if *restored.NoiseKey.Priv != *original.NoiseKey.Priv {
 		t.Error("NoiseKey private key mismatch")
 	}
-	if *restored.NoiseKey.Pub != *original.NoiseKey.Pub {
-		t.Error("NoiseKey public key mismatch")
+
+	// IdentityKey round-trip
+	if *restored.IdentityKey.Pub != *original.IdentityKey.Pub {
+		t.Error("IdentityKey public key mismatch")
 	}
 	if *restored.IdentityKey.Priv != *original.IdentityKey.Priv {
 		t.Error("IdentityKey private key mismatch")
 	}
-	if *restored.IdentityKey.Pub != *original.IdentityKey.Pub {
-		t.Error("IdentityKey public key mismatch")
+
+	// JID round-trip
+	if restored.ID.User != original.ID.User {
+		t.Errorf("JID User mismatch: got %s, want %s", restored.ID.User, original.ID.User)
 	}
-	if *restored.SignedPreKey.Priv != *original.SignedPreKey.Priv {
-		t.Error("SignedPreKey private key mismatch")
+	if restored.ID.Device != original.ID.Device {
+		t.Errorf("JID Device mismatch: got %d, want %d", restored.ID.Device, original.ID.Device)
 	}
-	if *restored.SignedPreKey.Pub != *original.SignedPreKey.Pub {
-		t.Error("SignedPreKey public key mismatch")
-	}
-	if restored.SignedPreKey.KeyID != original.SignedPreKey.KeyID {
-		t.Errorf("SignedPreKey KeyID mismatch: got %d, want %d", restored.SignedPreKey.KeyID, original.SignedPreKey.KeyID)
-	}
-	if *restored.SignedPreKey.Signature != *original.SignedPreKey.Signature {
-		t.Error("SignedPreKey Signature mismatch")
-	}
+
+	// RegistrationID round-trip
 	if restored.RegistrationID != original.RegistrationID {
 		t.Errorf("RegistrationID mismatch: got %d, want %d", restored.RegistrationID, original.RegistrationID)
 	}
+
+	// AdvSecretKey round-trip
 	if !bytes.Equal(restored.AdvSecretKey, original.AdvSecretKey) {
 		t.Error("AdvSecretKey mismatch")
 	}
 
-	// Compare JID/LID
-	if restored.ID.String() != original.ID.String() {
-		t.Errorf("JID mismatch: got %s, want %s", restored.ID.String(), original.ID.String())
+	// SignedPreKey is regenerated with same KeyID (but different random key pair)
+	if restored.SignedPreKey == nil {
+		t.Fatal("SignedPreKey is nil")
 	}
-	if restored.LID.String() != original.LID.String() {
-		t.Errorf("LID mismatch: got %s, want %s", restored.LID.String(), original.LID.String())
+	if restored.SignedPreKey.KeyID != original.SignedPreKey.KeyID {
+		t.Errorf("SignedPreKey KeyID mismatch: got %d, want %d", restored.SignedPreKey.KeyID, original.SignedPreKey.KeyID)
 	}
-
-	// Compare Account
-	if !bytes.Equal(restored.Account.Details, original.Account.Details) {
-		t.Error("Account.Details mismatch")
+	if restored.SignedPreKey.Pub == nil || restored.SignedPreKey.Priv == nil {
+		t.Error("SignedPreKey keys are nil")
 	}
-	if !bytes.Equal(restored.Account.AccountSignatureKey, original.Account.AccountSignatureKey) {
-		t.Error("Account.AccountSignatureKey mismatch")
-	}
-	if !bytes.Equal(restored.Account.AccountSignature, original.Account.AccountSignature) {
-		t.Error("Account.AccountSignature mismatch")
-	}
-	if !bytes.Equal(restored.Account.DeviceSignature, original.Account.DeviceSignature) {
-		t.Error("Account.DeviceSignature mismatch")
+	if restored.SignedPreKey.Signature == nil {
+		t.Error("SignedPreKey Signature is nil")
 	}
 
-	// Compare metadata
-	if restored.Platform != original.Platform {
-		t.Errorf("Platform mismatch: got %q, want %q", restored.Platform, original.Platform)
+	// Account should be empty but non-nil
+	if restored.Account == nil {
+		t.Fatal("Account is nil")
 	}
-	if restored.FacebookUUID != original.FacebookUUID {
-		t.Errorf("FacebookUUID mismatch: got %s, want %s", restored.FacebookUUID, original.FacebookUUID)
+}
+
+func TestExportFormat(t *testing.T) {
+	device := makeTestDevice()
+	code, err := ExportTransferCode(device)
+	if err != nil {
+		t.Fatalf("ExportTransferCode failed: %v", err)
 	}
-	if restored.LIDMigrationTimestamp != original.LIDMigrationTimestamp {
-		t.Errorf("LIDMigrationTimestamp mismatch: got %d, want %d", restored.LIDMigrationTimestamp, original.LIDMigrationTimestamp)
+
+	segments := strings.Split(code, ",")
+
+	// Segment 2-5 should be valid base64 encoding 32 bytes each
+	for i := 1; i <= 4; i++ {
+		data, err := base64.StdEncoding.DecodeString(segments[i])
+		if err != nil {
+			t.Errorf("segment %d: invalid base64: %v", i+1, err)
+		}
+		if len(data) != 32 {
+			t.Errorf("segment %d: expected 32 bytes, got %d", i+1, len(data))
+		}
+	}
+
+	// Segment 6 should be valid base64
+	seg6, err := base64.StdEncoding.DecodeString(segments[5])
+	if err != nil {
+		t.Errorf("segment 6: invalid base64: %v", err)
+	}
+	// Should contain phone + '#' + 42 bytes
+	expectedPrefix := "8613800138000#"
+	if !strings.HasPrefix(string(seg6), expectedPrefix) {
+		t.Errorf("segment 6: expected prefix %q, got %q...", expectedPrefix, string(seg6[:min(len(seg6), 20)]))
+	}
+}
+
+func TestImportExternalCode(t *testing.T) {
+	// Real-world format from external tool
+	code := "19549193970,bD7XmH3mLWOQ2ogQDXX7P2JY8QSnYH69x3kn5pAVQmo=,yPhLJnlAKlONQvMWFx3f91whxyXDWQoaIjMFa8gI8FM=,xm8owsrVPS2qr15t/bddWovaWrkadyqG9kodCHUuu2c=,6BeKN2Oz5V3nmhmCD46DtbWVMCHbAdXgiHf1YYYRG0Q=,bnwjalkTFzuW2STTlT1iog=="
+
+	device, err := ImportTransferCode(code)
+	if err != nil {
+		t.Fatalf("ImportTransferCode failed: %v", err)
+	}
+
+	// Verify phone
+	if device.ID.User != "19549193970" {
+		t.Errorf("phone: got %s, want 19549193970", device.ID.User)
+	}
+
+	// NoiseKey should match segment 2 public key
+	expectedNoisePub, _ := base64.StdEncoding.DecodeString("bD7XmH3mLWOQ2ogQDXX7P2JY8QSnYH69x3kn5pAVQmo=")
+	if !bytes.Equal(device.NoiseKey.Pub[:], expectedNoisePub) {
+		t.Error("NoiseKey.Pub mismatch")
+	}
+
+	// IdentityKey should match segment 4 public key
+	expectedIdentityPub, _ := base64.StdEncoding.DecodeString("xm8owsrVPS2qr15t/bddWovaWrkadyqG9kodCHUuu2c=")
+	if !bytes.Equal(device.IdentityKey.Pub[:], expectedIdentityPub) {
+		t.Error("IdentityKey.Pub mismatch")
+	}
+
+	// External format — seg6 not our format, so defaults used
+	// Device should still have valid defaults
+	if device.SignedPreKey == nil {
+		t.Fatal("SignedPreKey should be generated")
+	}
+	if device.Account == nil {
+		t.Fatal("Account should be non-nil")
+	}
+	if len(device.AdvSecretKey) != 32 {
+		t.Errorf("AdvSecretKey: expected 32 bytes, got %d", len(device.AdvSecretKey))
+	}
+	if device.RegistrationID == 0 {
+		t.Log("RegistrationID is 0 (may be random default)")
 	}
 }
 
@@ -149,85 +204,33 @@ func TestExportTransferCode_NoJID(t *testing.T) {
 	}
 }
 
+func TestImportTransferCode_WrongSegmentCount(t *testing.T) {
+	_, err := ImportTransferCode("only,three,segments")
+	if err == nil {
+		t.Fatal("expected error for wrong segment count")
+	}
+}
+
 func TestImportTransferCode_InvalidBase64(t *testing.T) {
-	_, err := ImportTransferCode("!!!invalid!!!")
+	_, err := ImportTransferCode("12345,!!!,valid,valid,valid,valid")
 	if err == nil {
 		t.Fatal("expected error for invalid base64")
 	}
 }
 
-func TestImportTransferCode_CorruptedChecksum(t *testing.T) {
-	device := makeTestDevice()
-	code, err := ExportTransferCode(device)
-	if err != nil {
-		t.Fatalf("ExportTransferCode failed: %v", err)
-	}
-
-	// Flip a character in the first segment to corrupt the data
-	runes := []rune(code)
-	for i, r := range runes {
-		if r != '.' {
-			if r == 'A' {
-				runes[i] = 'B'
-			} else {
-				runes[i] = 'A'
-			}
-			break
-		}
-	}
-	corrupted := string(runes)
-
-	_, err = ImportTransferCode(corrupted)
+func TestImportTransferCode_WrongKeyLength(t *testing.T) {
+	short := base64.StdEncoding.EncodeToString([]byte{1, 2, 3})
+	valid := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0}, 32))
+	_, err := ImportTransferCode("12345," + short + "," + valid + "," + valid + "," + valid + "," + valid)
 	if err == nil {
-		t.Fatal("expected error for corrupted transfer code")
+		t.Fatal("expected error for wrong key length")
 	}
 }
 
-func TestImportTransferCode_TooShort(t *testing.T) {
-	short := base64.RawURLEncoding.EncodeToString([]byte{1, 2, 3})
-	_, err := ImportTransferCode(short)
+func TestImportTransferCode_EmptyPhone(t *testing.T) {
+	valid := base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{0}, 32))
+	_, err := ImportTransferCode("," + valid + "," + valid + "," + valid + "," + valid + "," + valid)
 	if err == nil {
-		t.Fatal("expected error for too-short transfer code")
-	}
-}
-
-func TestImportTransferCode_WrongVersion(t *testing.T) {
-	device := makeTestDevice()
-	code, err := ExportTransferCode(device)
-	if err != nil {
-		t.Fatalf("ExportTransferCode failed: %v", err)
-	}
-
-	// Decode, change version byte, re-encode with correct checksum
-	joined := strings.ReplaceAll(code, ".", "")
-	data, _ := base64.RawURLEncoding.DecodeString(joined)
-	payload := data[:len(data)-4]
-	payload[0] = 99 // wrong version
-
-	checksum := crc32.ChecksumIEEE(payload)
-	checksumBuf := make([]byte, 4)
-	binary.BigEndian.PutUint32(checksumBuf, checksum)
-	newData := append(payload, checksumBuf...)
-
-	reencoded := base64.RawURLEncoding.EncodeToString(newData)
-	_, err = ImportTransferCode(reencoded)
-	if err == nil {
-		t.Fatal("expected error for wrong version")
-	}
-}
-
-func TestExportTransferCode_ZeroFacebookUUID(t *testing.T) {
-	device := makeTestDevice()
-	device.FacebookUUID = uuid.Nil
-	code, err := ExportTransferCode(device)
-	if err != nil {
-		t.Fatalf("ExportTransferCode failed: %v", err)
-	}
-	restored, err := ImportTransferCode(code)
-	if err != nil {
-		t.Fatalf("ImportTransferCode failed: %v", err)
-	}
-	if restored.FacebookUUID != uuid.Nil {
-		t.Errorf("expected nil UUID, got %s", restored.FacebookUUID)
+		t.Fatal("expected error for empty phone")
 	}
 }

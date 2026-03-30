@@ -10,25 +10,32 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
-	"hash/crc32"
 	"strings"
 
-	"github.com/google/uuid"
+	mathRand "math/rand/v2"
+
+	"go.mau.fi/util/random"
 
 	"go.mau.fi/whatsmeow/proto/waAdv"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/util/keys"
 )
 
-const transferCodeVersion = 1
-
-// ExportTransferCode serializes the device identity into a six-segment transfer code.
-// Only the device identity is exported (keys, ADV, JID, metadata).
-// Signal sessions, pre-keys, sender keys, and app state are NOT included.
+// ExportTransferCode exports the device identity as a six-segment transfer code
+// in the industry-standard comma-separated format:
 //
-// After importing on another system, existing E2E sessions must be re-established
-// (the first message to each contact triggers this automatically).
-// Both systems must NOT connect simultaneously with the same device identity.
+//	phone,identityPub,identityPriv,messagePub,messagePriv,deviceData
+//
+// Field mapping:
+//   - Segment 1: Phone number (Device.ID.User)
+//   - Segment 2: Noise public key (base64) — called "Identity Public Key" in the ecosystem
+//   - Segment 3: Noise private key (base64) — called "Identity Private Key"
+//   - Segment 4: Signal identity public key (base64) — called "Message Public Key"
+//   - Segment 5: Signal identity private key (base64) — called "Message Private Key"
+//   - Segment 6: Packed device data (base64) — RegistrationID, device number, AdvSecretKey, etc.
+//
+// Only the device identity is exported. Signal sessions, sender keys, and app state are NOT included.
+// After importing on another system, E2E sessions will be re-established automatically on first message.
 // The transfer code contains private key material — treat it as a secret.
 func ExportTransferCode(device *Device) (string, error) {
 	if device == nil {
@@ -37,325 +44,180 @@ func ExportTransferCode(device *Device) (string, error) {
 	if device.ID == nil {
 		return "", fmt.Errorf("device has no JID")
 	}
-	if device.NoiseKey == nil || device.NoiseKey.Priv == nil {
+	if device.NoiseKey == nil || device.NoiseKey.Pub == nil || device.NoiseKey.Priv == nil {
 		return "", fmt.Errorf("device has no noise key")
 	}
-	if device.IdentityKey == nil || device.IdentityKey.Priv == nil {
+	if device.IdentityKey == nil || device.IdentityKey.Pub == nil || device.IdentityKey.Priv == nil {
 		return "", fmt.Errorf("device has no identity key")
 	}
-	if device.SignedPreKey == nil || device.SignedPreKey.Priv == nil || device.SignedPreKey.Signature == nil {
-		return "", fmt.Errorf("device has no signed pre-key")
-	}
-	if device.Account == nil {
-		return "", fmt.Errorf("device has no account")
-	}
 
-	data := marshalDeviceIdentity(device)
+	b64 := base64.StdEncoding.EncodeToString
 
-	checksum := crc32.ChecksumIEEE(data)
-	buf := make([]byte, 4)
-	binary.BigEndian.PutUint32(buf, checksum)
-	data = append(data, buf...)
+	seg1 := device.ID.User
+	seg2 := b64(device.NoiseKey.Pub[:])
+	seg3 := b64(device.NoiseKey.Priv[:])
+	seg4 := b64(device.IdentityKey.Pub[:])
+	seg5 := b64(device.IdentityKey.Priv[:])
+	seg6 := b64(packSegment6(device))
 
-	encoded := base64.RawURLEncoding.EncodeToString(data)
-	return formatSixSegments(encoded), nil
+	return strings.Join([]string{seg1, seg2, seg3, seg4, seg5, seg6}, ","), nil
 }
 
-// ImportTransferCode deserializes a six-segment transfer code back into a Device.
-// The returned Device has no store interfaces set — the caller must attach it
-// to a Container (via Container.PutDevice) before use.
-func ImportTransferCode(code string) (*Device, error) {
-	joined := strings.ReplaceAll(code, ".", "")
-	data, err := base64.RawURLEncoding.DecodeString(joined)
-	if err != nil {
-		return nil, fmt.Errorf("invalid base64: %w", err)
-	}
-	if len(data) < 5 {
-		return nil, fmt.Errorf("transfer code too short")
-	}
-
-	// Verify CRC32 checksum (last 4 bytes)
-	payload := data[:len(data)-4]
-	expectedChecksum := binary.BigEndian.Uint32(data[len(data)-4:])
-	actualChecksum := crc32.ChecksumIEEE(payload)
-	if expectedChecksum != actualChecksum {
-		return nil, fmt.Errorf("checksum mismatch: transfer code is corrupted")
-	}
-
-	return unmarshalDeviceIdentity(payload)
-}
-
-func marshalDeviceIdentity(device *Device) []byte {
+// packSegment6 encodes extra device metadata into the sixth segment.
+// Format: phone_ascii + '#' + registrationID(4B) + device(2B) + preKeyID(4B) + advSecretKey(32B)
+func packSegment6(device *Device) []byte {
 	var buf []byte
+	buf = append(buf, []byte(device.ID.User)...)
+	buf = append(buf, '#')
 
-	// Version
-	buf = append(buf, transferCodeVersion)
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint32(b, device.RegistrationID)
+	buf = append(buf, b...)
 
-	// Fixed-size key material (32+32+32+4+64+4+32 = 200 bytes)
-	buf = append(buf, device.NoiseKey.Priv[:]...)
-	buf = append(buf, device.IdentityKey.Priv[:]...)
-	buf = append(buf, device.SignedPreKey.Priv[:]...)
-	buf = appendUint32(buf, device.SignedPreKey.KeyID)
-	buf = append(buf, device.SignedPreKey.Signature[:]...)
-	buf = appendUint32(buf, device.RegistrationID)
-	buf = append(buf, device.AdvSecretKey...)
+	d := make([]byte, 2)
+	binary.BigEndian.PutUint16(d, device.ID.Device)
+	buf = append(buf, d...)
 
-	// ADV fields (32+64+64 fixed + variable Details)
-	buf = append(buf, device.Account.AccountSignatureKey...)
-	buf = append(buf, device.Account.AccountSignature...)
-	buf = append(buf, device.Account.DeviceSignature...)
-	buf = appendLenPrefixed(buf, device.Account.Details)
+	k := make([]byte, 4)
+	if device.SignedPreKey != nil {
+		binary.BigEndian.PutUint32(k, device.SignedPreKey.KeyID)
+	}
+	buf = append(buf, k...)
 
-	// JID and LID as strings
-	buf = appendLenPrefixed(buf, []byte(device.ID.String()))
-	buf = appendLenPrefixed(buf, []byte(device.LID.String()))
-
-	// Platform
-	buf = appendLenPrefixed(buf, []byte(device.Platform))
-
-	// FacebookUUID (16 bytes)
-	uuidBytes, _ := device.FacebookUUID.MarshalBinary()
-	buf = append(buf, uuidBytes...)
-
-	// LIDMigrationTimestamp (8 bytes)
-	buf = appendInt64(buf, device.LIDMigrationTimestamp)
+	advKey := make([]byte, 32)
+	copy(advKey, device.AdvSecretKey)
+	buf = append(buf, advKey...)
 
 	return buf
 }
 
-func unmarshalDeviceIdentity(data []byte) (*Device, error) {
-	r := &byteReader{data: data}
-
-	// Version
-	version, err := r.readByte()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read version: %w", err)
+// ImportTransferCode imports a six-segment transfer code and returns a Device.
+// The returned Device has no store interfaces set — the caller must attach it
+// to a Container (via Container.PutDevice) before use.
+//
+// Supports codes exported by whatsmeow and other WhatsApp libraries.
+// Fields not present in the transfer code are auto-generated:
+//   - SignedPreKey: Generated and signed with the imported IdentityKey
+//   - Account: Empty ADVSignedDeviceIdentity
+//   - LID: Empty (populated automatically after connection)
+//
+// If the sixth segment uses a format from a different tool, RegistrationID and
+// Device number will use defaults. The caller can override them on the returned Device.
+func ImportTransferCode(code string) (*Device, error) {
+	segments := strings.Split(code, ",")
+	if len(segments) != 6 {
+		return nil, fmt.Errorf("expected 6 comma-separated segments, got %d", len(segments))
 	}
-	if version != transferCodeVersion {
-		return nil, fmt.Errorf("unsupported transfer code version: %d", version)
+
+	phone := strings.TrimSpace(segments[0])
+	if phone == "" {
+		return nil, fmt.Errorf("segment 1 (phone) is empty")
+	}
+
+	noisePub, noisePriv, err := decodeKeyPairSegments(segments[1], segments[2], "identity")
+	if err != nil {
+		return nil, err
+	}
+	identityPub, identityPriv, err := decodeKeyPairSegments(segments[3], segments[4], "message")
+	if err != nil {
+		return nil, err
+	}
+
+	seg6Data, err := base64.StdEncoding.DecodeString(strings.TrimSpace(segments[5]))
+	if err != nil {
+		return nil, fmt.Errorf("segment 6 (device data): invalid base64: %w", err)
 	}
 
 	device := &Device{}
-	device.SignedPreKey = &keys.PreKey{}
 
-	// NoiseKey (32 bytes private)
-	noisePriv, err := r.readBytes(32)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read noise key: %w", err)
-	}
+	// Reconstruct key pairs from private keys (public keys are derived via curve25519)
 	device.NoiseKey = keys.NewKeyPairFromPrivateKey(*(*[32]byte)(noisePriv))
-
-	// IdentityKey (32 bytes private)
-	identityPriv, err := r.readBytes(32)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read identity key: %w", err)
-	}
 	device.IdentityKey = keys.NewKeyPairFromPrivateKey(*(*[32]byte)(identityPriv))
 
-	// SignedPreKey (32 bytes private + 4 bytes KeyID + 64 bytes signature)
-	preKeyPriv, err := r.readBytes(32)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read pre-key: %w", err)
+	// Verify the derived public keys match what was explicitly provided
+	if *device.NoiseKey.Pub != *(*[32]byte)(noisePub) {
+		return nil, fmt.Errorf("noise key mismatch: derived public key does not match segment 2")
 	}
-	device.SignedPreKey.KeyPair = *keys.NewKeyPairFromPrivateKey(*(*[32]byte)(preKeyPriv))
+	if *device.IdentityKey.Pub != *(*[32]byte)(identityPub) {
+		return nil, fmt.Errorf("identity key mismatch: derived public key does not match segment 4")
+	}
 
-	keyID, err := r.readUint32()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read pre-key ID: %w", err)
-	}
-	device.SignedPreKey.KeyID = keyID
-
-	preKeySig, err := r.readBytes(64)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read pre-key signature: %w", err)
-	}
-	device.SignedPreKey.Signature = (*[64]byte)(preKeySig)
-
-	// RegistrationID (4 bytes)
-	regID, err := r.readUint32()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read registration ID: %w", err)
-	}
+	// Parse segment 6
+	regID, deviceNum, preKeyID, advSecretKey := unpackSegment6(seg6Data, phone)
 	device.RegistrationID = regID
+	device.AdvSecretKey = advSecretKey
 
-	// AdvSecretKey (32 bytes)
-	advKey, err := r.readBytes(32)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read adv secret key: %w", err)
-	}
-	device.AdvSecretKey = advKey
-
-	// ADV fields
-	var account waAdv.ADVSignedDeviceIdentity
-
-	accountSigKey, err := r.readBytes(32)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read account signature key: %w", err)
-	}
-	account.AccountSignatureKey = accountSigKey
-
-	accountSig, err := r.readBytes(64)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read account signature: %w", err)
-	}
-	account.AccountSignature = accountSig
-
-	deviceSig, err := r.readBytes(64)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read device signature: %w", err)
-	}
-	account.DeviceSignature = deviceSig
-
-	advDetails, err := r.readLenPrefixed()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read adv details: %w", err)
-	}
-	account.Details = advDetails
-	device.Account = &account
-
-	// JID
-	jidBytes, err := r.readLenPrefixed()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read JID: %w", err)
-	}
-	jid, err := types.ParseJID(string(jidBytes))
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse JID: %w", err)
+	// Build JID
+	jid := types.JID{
+		User:   phone,
+		Device: deviceNum,
+		Server: types.DefaultUserServer,
 	}
 	device.ID = &jid
 
-	// LID
-	lidBytes, err := r.readLenPrefixed()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read LID: %w", err)
-	}
-	lid, err := types.ParseJID(string(lidBytes))
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse LID: %w", err)
-	}
-	device.LID = lid
+	// Generate SignedPreKey (signed by IdentityKey)
+	device.SignedPreKey = device.IdentityKey.CreateSignedPreKey(preKeyID)
 
-	// Platform
-	platformBytes, err := r.readLenPrefixed()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read platform: %w", err)
-	}
-	device.Platform = string(platformBytes)
-
-	// FacebookUUID (16 bytes)
-	fbUUIDBytes, err := r.readBytes(16)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read facebook UUID: %w", err)
-	}
-	var fbUUID uuid.UUID
-	if err := fbUUID.UnmarshalBinary(fbUUIDBytes); err != nil {
-		return nil, fmt.Errorf("failed to parse facebook UUID: %w", err)
-	}
-	device.FacebookUUID = fbUUID
-
-	// LIDMigrationTimestamp (8 bytes)
-	lidMigTS, err := r.readInt64()
-	if err != nil {
-		return nil, fmt.Errorf("failed to read LID migration timestamp: %w", err)
-	}
-	device.LIDMigrationTimestamp = lidMigTS
+	// Empty Account — not needed for login, only used during initial pairing HMAC verification
+	device.Account = &waAdv.ADVSignedDeviceIdentity{}
 
 	return device, nil
 }
 
-func appendUint16(buf []byte, v uint16) []byte {
-	b := make([]byte, 2)
-	binary.BigEndian.PutUint16(b, v)
-	return append(buf, b...)
-}
-
-func appendUint32(buf []byte, v uint32) []byte {
-	b := make([]byte, 4)
-	binary.BigEndian.PutUint32(b, v)
-	return append(buf, b...)
-}
-
-func appendInt64(buf []byte, v int64) []byte {
-	b := make([]byte, 8)
-	binary.BigEndian.PutUint64(b, uint64(v))
-	return append(buf, b...)
-}
-
-func appendLenPrefixed(buf []byte, data []byte) []byte {
-	buf = appendUint16(buf, uint16(len(data)))
-	return append(buf, data...)
-}
-
-func formatSixSegments(encoded string) string {
-	segLen := (len(encoded) + 5) / 6
-	segments := make([]string, 0, 6)
-	for i := 0; i < len(encoded); i += segLen {
-		end := i + segLen
-		if end > len(encoded) {
-			end = len(encoded)
-		}
-		segments = append(segments, encoded[i:end])
-	}
-	return strings.Join(segments, ".")
-}
-
-func splitTransferCode(code string) []string {
-	return strings.Split(code, ".")
-}
-
-// byteReader is a simple sequential byte reader with bounds checking.
-type byteReader struct {
-	data []byte
-	pos  int
-}
-
-func (r *byteReader) readByte() (byte, error) {
-	if r.pos >= len(r.data) {
-		return 0, fmt.Errorf("unexpected end of data at offset %d", r.pos)
-	}
-	b := r.data[r.pos]
-	r.pos++
-	return b, nil
-}
-
-func (r *byteReader) readBytes(n int) ([]byte, error) {
-	if r.pos+n > len(r.data) {
-		return nil, fmt.Errorf("unexpected end of data at offset %d (need %d bytes)", r.pos, n)
-	}
-	b := make([]byte, n)
-	copy(b, r.data[r.pos:r.pos+n])
-	r.pos += n
-	return b, nil
-}
-
-func (r *byteReader) readUint16() (uint16, error) {
-	b, err := r.readBytes(2)
+// decodeKeyPairSegments decodes a base64 public+private key pair from two segments.
+func decodeKeyPairSegments(pubSeg, privSeg, name string) (pub, priv []byte, err error) {
+	pub, err = base64.StdEncoding.DecodeString(strings.TrimSpace(pubSeg))
 	if err != nil {
-		return 0, err
+		return nil, nil, fmt.Errorf("%s public key: invalid base64: %w", name, err)
 	}
-	return binary.BigEndian.Uint16(b), nil
+	if len(pub) != 32 {
+		return nil, nil, fmt.Errorf("%s public key: expected 32 bytes, got %d", name, len(pub))
+	}
+
+	priv, err = base64.StdEncoding.DecodeString(strings.TrimSpace(privSeg))
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s private key: invalid base64: %w", name, err)
+	}
+	if len(priv) != 32 {
+		return nil, nil, fmt.Errorf("%s private key: expected 32 bytes, got %d", name, len(priv))
+	}
+
+	return pub, priv, nil
 }
 
-func (r *byteReader) readUint32() (uint32, error) {
-	b, err := r.readBytes(4)
-	if err != nil {
-		return 0, err
-	}
-	return binary.BigEndian.Uint32(b), nil
-}
+// unpackSegment6 extracts structured data from the sixth segment.
+// If the data matches our format (phone + '#' + 42 bytes), all fields are extracted.
+// Otherwise, sensible defaults are used.
+func unpackSegment6(data []byte, phone string) (regID uint32, deviceNum uint16, preKeyID uint32, advSecretKey []byte) {
+	// Defaults
+	regID = mathRand.Uint32()
+	deviceNum = 0
+	preKeyID = 1
+	advSecretKey = random.Bytes(32)
 
-func (r *byteReader) readInt64() (int64, error) {
-	b, err := r.readBytes(8)
-	if err != nil {
-		return 0, err
+	prefix := phone + "#"
+	if len(data) <= len(prefix) || string(data[:len(prefix)]) != prefix {
+		return
 	}
-	return int64(binary.BigEndian.Uint64(b)), nil
-}
 
-func (r *byteReader) readLenPrefixed() ([]byte, error) {
-	length, err := r.readUint16()
-	if err != nil {
-		return nil, err
+	rest := data[len(prefix):]
+
+	// Our format: regID(4B) + device(2B) + preKeyID(4B) + advSecretKey(32B) = 42 bytes
+	if len(rest) >= 42 {
+		regID = binary.BigEndian.Uint32(rest[0:4])
+		deviceNum = binary.BigEndian.Uint16(rest[4:6])
+		preKeyID = binary.BigEndian.Uint32(rest[6:10])
+		advSecretKey = make([]byte, 32)
+		copy(advSecretKey, rest[10:42])
+		return
 	}
-	return r.readBytes(int(length))
+
+	// Partial/external format — extract what we can
+	if len(rest) >= 4 {
+		regID = binary.BigEndian.Uint32(rest[0:4])
+	}
+	if len(rest) >= 6 {
+		deviceNum = binary.BigEndian.Uint16(rest[4:6])
+	}
+	return
 }
