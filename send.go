@@ -989,6 +989,21 @@ func getMediaTypeFromMessage(msg *waE2E.Message) string {
 	}
 }
 
+func getInteractiveMessage(msg *waE2E.Message) *waE2E.InteractiveMessage {
+	switch {
+	case msg.ViewOnceMessage != nil && msg.ViewOnceMessage.Message != nil:
+		return getInteractiveMessage(msg.ViewOnceMessage.Message)
+	case msg.ViewOnceMessageV2 != nil && msg.ViewOnceMessageV2.Message != nil:
+		return getInteractiveMessage(msg.ViewOnceMessageV2.Message)
+	case msg.EphemeralMessage != nil && msg.EphemeralMessage.Message != nil:
+		return getInteractiveMessage(msg.EphemeralMessage.Message)
+	case msg.InteractiveMessage != nil:
+		return msg.InteractiveMessage
+	default:
+		return nil
+	}
+}
+
 func getButtonTypeFromMessage(msg *waE2E.Message) string {
 	switch {
 	case msg.ViewOnceMessage != nil:
@@ -1156,6 +1171,19 @@ func (cli *Client) getMessageContent(
 				Attrs: getButtonAttributes(message),
 			}},
 		})
+	} else if im := getInteractiveMessage(message); im != nil {
+		bizNode := waBinary.Node{
+			Tag: "biz",
+			Content: []waBinary.Node{{
+				Tag:   "interactive",
+				Attrs: waBinary.Attrs{"type": "native_flow", "v": "1"},
+				Content: []waBinary.Node{{
+					Tag:   "native_flow",
+					Attrs: waBinary.Attrs{"v": "9", "name": "mixed"},
+				}},
+			}},
+		}
+		content = append(content, bizNode)
 	}
 	return content
 }
