@@ -1005,8 +1005,6 @@ func getButtonTypeFromMessage(msg *waE2E.Message) string {
 		return "list"
 	case msg.ListResponseMessage != nil:
 		return "list_response"
-	case msg.InteractiveMessage != nil:
-		return "interactive"
 	case msg.InteractiveResponseMessage != nil:
 		return "interactive_response"
 	default:
