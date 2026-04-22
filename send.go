@@ -1005,6 +1005,19 @@ func getButtonTypeFromMessage(msg *waE2E.Message) string {
 		return "list"
 	case msg.ListResponseMessage != nil:
 		return "list_response"
+	case msg.InteractiveMessage != nil:
+		switch {
+		case msg.InteractiveMessage.GetNativeFlowMessage() != nil:
+			return "native_flow"
+		case msg.InteractiveMessage.GetCollectionMessage() != nil:
+			return "collection"
+		case msg.InteractiveMessage.GetShopStorefrontMessage() != nil:
+			return "shop_storefront"
+		case msg.InteractiveMessage.GetCarouselMessage() != nil:
+			return "carousel"
+		default:
+			return "native_flow"
+		}
 	case msg.InteractiveResponseMessage != nil:
 		return "interactive_response"
 	default:
@@ -1021,6 +1034,8 @@ func getButtonAttributes(msg *waE2E.Message) waBinary.Attrs {
 	case msg.EphemeralMessage != nil:
 		return getButtonAttributes(msg.EphemeralMessage.Message)
 	case msg.TemplateMessage != nil:
+		return waBinary.Attrs{}
+	case msg.InteractiveMessage != nil:
 		return waBinary.Attrs{}
 	case msg.ListMessage != nil:
 		return waBinary.Attrs{
@@ -1156,6 +1171,15 @@ func (cli *Client) getMessageContent(
 				Attrs: getButtonAttributes(message),
 			}},
 		})
+		// For private (1:1) chats with interactive messages, add bot node to enable rendering
+		if to, ok := msgAttrs["to"].(types.JID); ok && to.Server != types.GroupServer && to.Server != types.BroadcastServer {
+			if message.InteractiveMessage != nil || message.ButtonsMessage != nil {
+				content = append(content, waBinary.Node{
+					Tag:   "bot",
+					Attrs: waBinary.Attrs{"biz_bot": "1"},
+				})
+			}
+		}
 	}
 	return content
 }
