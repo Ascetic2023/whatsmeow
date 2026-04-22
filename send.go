@@ -1006,18 +1006,7 @@ func getButtonTypeFromMessage(msg *waE2E.Message) string {
 	case msg.ListResponseMessage != nil:
 		return "list_response"
 	case msg.InteractiveMessage != nil:
-		switch {
-		case msg.InteractiveMessage.GetNativeFlowMessage() != nil:
-			return "native_flow"
-		case msg.InteractiveMessage.GetCollectionMessage() != nil:
-			return "collection"
-		case msg.InteractiveMessage.GetShopStorefrontMessage() != nil:
-			return "shop_storefront"
-		case msg.InteractiveMessage.GetCarouselMessage() != nil:
-			return "carousel"
-		default:
-			return "native_flow"
-		}
+		return "interactive"
 	case msg.InteractiveResponseMessage != nil:
 		return "interactive_response"
 	default:
