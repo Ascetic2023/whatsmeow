@@ -1171,15 +1171,6 @@ func (cli *Client) getMessageContent(
 				Attrs: getButtonAttributes(message),
 			}},
 		})
-		// For private (1:1) chats with interactive messages, add bot node to enable rendering
-		if to, ok := msgAttrs["to"].(types.JID); ok && to.Server != types.GroupServer && to.Server != types.BroadcastServer {
-			if message.InteractiveMessage != nil || message.ButtonsMessage != nil {
-				content = append(content, waBinary.Node{
-					Tag:   "bot",
-					Attrs: waBinary.Attrs{"biz_bot": "1"},
-				})
-			}
-		}
 	}
 	return content
 }
