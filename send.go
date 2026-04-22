@@ -1024,8 +1024,6 @@ func getButtonAttributes(msg *waE2E.Message) waBinary.Attrs {
 		return getButtonAttributes(msg.EphemeralMessage.Message)
 	case msg.TemplateMessage != nil:
 		return waBinary.Attrs{}
-	case msg.InteractiveMessage != nil:
-		return waBinary.Attrs{}
 	case msg.ListMessage != nil:
 		return waBinary.Attrs{
 			"v":    "2",
