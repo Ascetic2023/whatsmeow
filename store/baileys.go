@@ -34,6 +34,28 @@ func (b *baileysBuffer) Decode() ([]byte, error) {
 	return base64.StdEncoding.DecodeString(b.Data)
 }
 
+// UnmarshalJSON accepts both the standard Baileys Buffer object ({"data": ..., "type": "Buffer"})
+// and a plain base64 string, since some exports serialize buffers (e.g. signedPreKey.signature)
+// as bare strings.
+func (b *baileysBuffer) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		b.Data = s
+		b.Type = "Buffer"
+		return nil
+	}
+	var obj struct {
+		Data string `json:"data"`
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(data, &obj); err != nil {
+		return err
+	}
+	b.Data = obj.Data
+	b.Type = obj.Type
+	return nil
+}
+
 type baileysKeyPair struct {
 	Private baileysBuffer `json:"private"`
 	Public  baileysBuffer `json:"public"`
