@@ -93,6 +93,30 @@ func TestImportBaileysJSON(t *testing.T) {
 	}
 }
 
+// testBaileysVariantJSON uses the non-standard shapes seen in some third-party exports:
+// signedPreKey.signature as a bare base64 string, signalIdentities as an object (not array),
+// and registrationId/keyId as quoted strings.
+const testBaileysVariantJSON = `{"noiseKey":{"private":{"data":"sJudX1ApwK/Zfk7rcz0Ggs8fddG8sumt3JcXzFbE3mk=","type":"Buffer"},"public":{"data":"Zhd0vcBmd6+clDr677GQV/8uAU66cPz7AHWxa6CV6Sc=","type":"Buffer"}},"advSecretKey":"LjGnhpxD66Bpq6twdTglMNTcd6gtc8+dOptUc6wSQJA=","signedIdentityKey":{"private":{"data":"UDJQ+RzjbzO9GysXFFouwHWO2xMUvibhTCTTMwxp2XI=","type":"Buffer"},"public":{"data":"Hhbd0La0xn76UHpqyDAbOr6iwaeF1BGB+CVTKSihgh0=","type":"Buffer"}},"signedPreKey":{"signature":"2zrOUl8gZxcd5VgltEQGw+HvsmF65ByyDhuObFt7TTfyc8b0q6g9rd+UF74bBuqk3wrVm5AQX8kx5rtzbFMbDA==","keyId":"1","keyPair":{"private":{"data":"cJnGBaSfT4VV29ayXFNs7KG4Wg9Xux9HtzZxAHb4/ko=","type":"Buffer"},"public":{"data":"Z5xTZkNEMhfo7oEj1srg1JqTuiQe1eplO3yviqRXZj4=","type":"Buffer"}}},"Phone":"23280202340","registrationId":"20","me":{"lid":"257363802116289:1@lid","name":"SADLISH BBY","id":"23280202340:1@s.whatsapp.net"},"account":{"deviceSignature":"EmykRGyUiVUqbOfTe6fxJLjvRBZvUxCWR6pmpeXFW9sdCHrjks5UFnd1KtkipZHAlDqOsxXsthxiSwQxCzfvBw==","details":"CNDZn8wDELmxlM4GGAEgACgA","accountSignature":"V4NH8sLNjOtWeAV2H3+0IyxTvHlWi+k+fTOLJZSFOESHZnpvIbMTJQG1z63hwsb77CXEDqGTfuFy2pIzpD+uCA==","accountSignatureKey":"q2QxuhTNwVJOLDl098uV2uakimFgMddiSBXJxupqT18="},"signalIdentities":{"identifier":{"name":"23280202340:1@s.whatsapp.net","deviceId":0},"identifierKey":{"data":"BatkMboUzcFSTiw5dPfLldrmpIphYDHXYkgVycbqak9f","type":"Buffer"}}}`
+
+func TestImportBaileysVariantJSON(t *testing.T) {
+	device, err := ImportBaileysJSON(testBaileysVariantJSON)
+	if err != nil {
+		t.Fatalf("ImportBaileysJSON failed on variant format: %v", err)
+	}
+	if device.RegistrationID != 20 {
+		t.Errorf("RegistrationID: got %d, want 20", device.RegistrationID)
+	}
+	if device.SignedPreKey == nil || device.SignedPreKey.KeyID != 1 {
+		t.Errorf("SignedPreKey.KeyID mismatch")
+	}
+	if device.SignedPreKey.Signature == nil {
+		t.Error("SignedPreKey.Signature is nil")
+	}
+	if device.Account == nil || len(device.Account.DeviceSignature) != 64 {
+		t.Errorf("Account.DeviceSignature: expected 64 bytes")
+	}
+}
+
 func TestExportBaileysJSON(t *testing.T) {
 	device := makeTestDevice()
 	device.PushName = "Test User"

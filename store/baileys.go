@@ -10,6 +10,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"go.mau.fi/whatsmeow/proto/waAdv"
 	"go.mau.fi/whatsmeow/types"
@@ -56,6 +58,24 @@ func (b *baileysBuffer) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// baileysInt accepts a JSON number or a quoted numeric string, since some exports
+// serialize numeric fields (e.g. registrationId) as strings.
+type baileysInt int64
+
+func (i *baileysInt) UnmarshalJSON(data []byte) error {
+	s := strings.Trim(string(data), `" `)
+	if s == "" || s == "null" {
+		*i = 0
+		return nil
+	}
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return fmt.Errorf("invalid integer %q: %w", s, err)
+	}
+	*i = baileysInt(n)
+	return nil
+}
+
 type baileysKeyPair struct {
 	Private baileysBuffer `json:"private"`
 	Public  baileysBuffer `json:"public"`
@@ -63,15 +83,15 @@ type baileysKeyPair struct {
 
 type baileysSignedPreKey struct {
 	Signature baileysBuffer  `json:"signature"`
-	KeyID     uint32         `json:"keyId"`
+	KeyID     baileysInt     `json:"keyId"`
 	KeyPair   baileysKeyPair `json:"keyPair"`
 }
 
 type baileysAccount struct {
-	DeviceSignature     string `json:"deviceSignature"`
-	Details             string `json:"details"`
-	AccountSignature    string `json:"accountSignature"`
-	AccountSignatureKey string `json:"accountSignatureKey"`
+	DeviceSignature     baileysBuffer `json:"deviceSignature"`
+	Details             baileysBuffer `json:"details"`
+	AccountSignature    baileysBuffer `json:"accountSignature"`
+	AccountSignatureKey baileysBuffer `json:"accountSignatureKey"`
 }
 
 type baileysMe struct {
@@ -88,7 +108,7 @@ type baileysCreds struct {
 	NoiseKey                baileysKeyPair      `json:"noiseKey"`
 	SignedIdentityKey       baileysKeyPair      `json:"signedIdentityKey"`
 	SignedPreKey            baileysSignedPreKey  `json:"signedPreKey"`
-	RegistrationID          uint32              `json:"registrationId"`
+	RegistrationID          baileysInt          `json:"registrationId"`
 	AdvSecretKey            string              `json:"advSecretKey"`
 	Account                 baileysAccount      `json:"account"`
 	Me                      baileysMe           `json:"me"`
@@ -98,15 +118,15 @@ type baileysCreds struct {
 	PairingCode             string              `json:"pairingCode,omitempty"`
 	RoutingInfo             *baileysBuffer      `json:"routingInfo,omitempty"`
 	Registered              bool                `json:"registered"`
-	AccountSyncCounter      int                 `json:"accountSyncCounter"`
-	FirstUnuploadedPreKeyId int                 `json:"firstUnuploadedPreKeyId"`
-	NextPreKeyId            int                 `json:"nextPreKeyId"`
-	LastAccountSyncTimestamp int64              `json:"lastAccountSyncTimestamp"`
+	AccountSyncCounter      baileysInt          `json:"accountSyncCounter"`
+	FirstUnuploadedPreKeyId baileysInt          `json:"firstUnuploadedPreKeyId"`
+	NextPreKeyId            baileysInt          `json:"nextPreKeyId"`
+	LastAccountSyncTimestamp baileysInt         `json:"lastAccountSyncTimestamp"`
 	LastPropHash            string              `json:"lastPropHash,omitempty"`
 	MyAppStateKeyId         string              `json:"myAppStateKeyId,omitempty"`
-	ProcessedHistoryMessages []any              `json:"processedHistoryMessages"`
+	ProcessedHistoryMessages json.RawMessage    `json:"processedHistoryMessages"`
 	AccountSettings         baileysAccountSettings `json:"accountSettings"`
-	SignalIdentities        []any               `json:"signalIdentities"`
+	SignalIdentities        json.RawMessage     `json:"signalIdentities"`
 }
 
 // ExportBaileysJSON exports the device identity as a Baileys-compatible creds.json.
@@ -141,13 +161,13 @@ func ExportBaileysJSON(device *Device) (string, error) {
 		},
 		SignedPreKey: baileysSignedPreKey{
 			Signature: newBuffer(device.SignedPreKey.Signature[:]),
-			KeyID:     device.SignedPreKey.KeyID,
+			KeyID:     baileysInt(device.SignedPreKey.KeyID),
 			KeyPair: baileysKeyPair{
 				Private: newBuffer(device.SignedPreKey.Priv[:]),
 				Public:  newBuffer(device.SignedPreKey.Pub[:]),
 			},
 		},
-		RegistrationID: device.RegistrationID,
+		RegistrationID: baileysInt(device.RegistrationID),
 		AdvSecretKey:   b64(device.AdvSecretKey),
 		Me: baileysMe{
 			ID:   device.ID.String(),
@@ -157,11 +177,11 @@ func ExportBaileysJSON(device *Device) (string, error) {
 		Platform:   device.Platform,
 		Registered: true,
 
-		FirstUnuploadedPreKeyId: int(device.SignedPreKey.KeyID) + 1,
-		NextPreKeyId:            int(device.SignedPreKey.KeyID) + 1,
+		FirstUnuploadedPreKeyId: baileysInt(device.SignedPreKey.KeyID) + 1,
+		NextPreKeyId:            baileysInt(device.SignedPreKey.KeyID) + 1,
 
-		ProcessedHistoryMessages: []any{},
-		SignalIdentities:         []any{},
+		ProcessedHistoryMessages: json.RawMessage("[]"),
+		SignalIdentities:         json.RawMessage("[]"),
 	}
 
 	// LID
@@ -172,10 +192,10 @@ func ExportBaileysJSON(device *Device) (string, error) {
 	// Account (ADV)
 	if device.Account != nil {
 		creds.Account = baileysAccount{
-			Details:             b64(device.Account.Details),
-			AccountSignature:    b64(device.Account.AccountSignature),
-			AccountSignatureKey: b64(device.Account.AccountSignatureKey),
-			DeviceSignature:     b64(device.Account.DeviceSignature),
+			Details:             newBuffer(device.Account.Details),
+			AccountSignature:    newBuffer(device.Account.AccountSignature),
+			AccountSignatureKey: newBuffer(device.Account.AccountSignatureKey),
+			DeviceSignature:     newBuffer(device.Account.DeviceSignature),
 		}
 	}
 
@@ -225,12 +245,12 @@ func ImportBaileysJSON(jsonData string) (*Device, error) {
 	}
 	device.SignedPreKey = &keys.PreKey{
 		KeyPair:   *keys.NewKeyPairFromPrivateKey(*(*[32]byte)(preKeyPriv)),
-		KeyID:     creds.SignedPreKey.KeyID,
+		KeyID:     uint32(creds.SignedPreKey.KeyID),
 		Signature: (*[64]byte)(preKeySig),
 	}
 
 	// RegistrationID
-	device.RegistrationID = creds.RegistrationID
+	device.RegistrationID = uint32(creds.RegistrationID)
 
 	// AdvSecretKey
 	device.AdvSecretKey, err = base64.StdEncoding.DecodeString(creds.AdvSecretKey)
@@ -267,31 +287,19 @@ func ImportBaileysJSON(jsonData string) (*Device, error) {
 	// Platform
 	device.Platform = creds.Platform
 
-	// Account (ADV)
+	// Account (ADV) — fields may be either base64 strings or {data, type} buffers.
 	var account waAdv.ADVSignedDeviceIdentity
-	if creds.Account.Details != "" {
-		account.Details, err = base64.StdEncoding.DecodeString(creds.Account.Details)
-		if err != nil {
-			return nil, fmt.Errorf("invalid account.details: %w", err)
-		}
+	if account.Details, err = creds.Account.Details.Decode(); err != nil {
+		return nil, fmt.Errorf("invalid account.details: %w", err)
 	}
-	if creds.Account.AccountSignature != "" {
-		account.AccountSignature, err = base64.StdEncoding.DecodeString(creds.Account.AccountSignature)
-		if err != nil {
-			return nil, fmt.Errorf("invalid account.accountSignature: %w", err)
-		}
+	if account.AccountSignature, err = creds.Account.AccountSignature.Decode(); err != nil {
+		return nil, fmt.Errorf("invalid account.accountSignature: %w", err)
 	}
-	if creds.Account.AccountSignatureKey != "" {
-		account.AccountSignatureKey, err = base64.StdEncoding.DecodeString(creds.Account.AccountSignatureKey)
-		if err != nil {
-			return nil, fmt.Errorf("invalid account.accountSignatureKey: %w", err)
-		}
+	if account.AccountSignatureKey, err = creds.Account.AccountSignatureKey.Decode(); err != nil {
+		return nil, fmt.Errorf("invalid account.accountSignatureKey: %w", err)
 	}
-	if creds.Account.DeviceSignature != "" {
-		account.DeviceSignature, err = base64.StdEncoding.DecodeString(creds.Account.DeviceSignature)
-		if err != nil {
-			return nil, fmt.Errorf("invalid account.deviceSignature: %w", err)
-		}
+	if account.DeviceSignature, err = creds.Account.DeviceSignature.Decode(); err != nil {
+		return nil, fmt.Errorf("invalid account.deviceSignature: %w", err)
 	}
 	device.Account = &account
 
