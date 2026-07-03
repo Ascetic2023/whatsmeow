@@ -11,6 +11,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/sha256"
+	"encoding/base32"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -46,6 +47,8 @@ const (
 )
 
 var notNumbers = regexp.MustCompile("[^0-9]")
+
+var linkingBase32 = base32.NewEncoding("123456789ABCDEFGHJKLMNPQRSTVWXYZ")
 
 // ErrInvalidPairCode is returned when a custom pair code has an invalid format.
 var ErrInvalidPairCode = fmt.Errorf("pair code must be exactly 8 digits (e.g. 77778888 or 7777-8888)")
@@ -117,11 +120,11 @@ func (cli *Client) GeneratePairCode(customCode ...string) (string, error) {
 		}
 	}
 	ephemeralKeyPair, ephemeralKey, encodedLinkingCode := generateCompanionEphemeralKey(normalized)
-	cli.pendingPairCode = &pendingPairCode{
+	cli.pendingPairCode.Store(&pendingPairCode{
 		keyPair:      ephemeralKeyPair,
 		ephemeralKey: ephemeralKey,
 		linkingCode:  encodedLinkingCode,
-	}
+	})
 	return encodedLinkingCode[0:4] + "-" + encodedLinkingCode[4:8], nil
 }
 
@@ -135,7 +138,7 @@ func (cli *Client) SendPairCode(ctx context.Context, phone string, showPushNotif
 	if cli == nil {
 		return ErrClientIsNil
 	}
-	pending := cli.pendingPairCode
+	pending := cli.pendingPairCode.Load()
 	if pending == nil {
 		return fmt.Errorf("no pending pair code, call GeneratePairCode first")
 	}
@@ -178,13 +181,13 @@ func (cli *Client) SendPairCode(ctx context.Context, phone string, showPushNotif
 	if !ok {
 		return fmt.Errorf("unexpected type %T in content of link_code_pairing_ref tag", pairingRefNode.Content)
 	}
-	cli.phoneLinkingCache = &phoneLinkingCache{
+	cli.phoneLinkingCache.Store(&phoneLinkingCache{
 		jid:         jid,
 		keyPair:     pending.keyPair,
 		linkingCode: pending.linkingCode,
 		pairingRef:  string(pairingRef),
-	}
-	cli.pendingPairCode = nil
+	})
+	cli.pendingPairCode.Store(nil)
 	return nil
 }
 
@@ -232,7 +235,7 @@ func (cli *Client) handleCodePairNotification(ctx context.Context, parentNode *w
 			In:  "notification",
 		}
 	}
-	linkCache := cli.phoneLinkingCache
+	linkCache := cli.phoneLinkingCache.Load()
 	if linkCache == nil {
 		return fmt.Errorf("received code pair notification without a pending pairing")
 	}
