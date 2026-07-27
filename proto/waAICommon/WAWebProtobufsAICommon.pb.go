@@ -75,6 +75,7 @@ const (
 	BotMetricsEntryPoint_GROUP_MEMBER                        BotMetricsEntryPoint = 54
 	BotMetricsEntryPoint_CHATLIST_SEARCH                     BotMetricsEntryPoint = 55
 	BotMetricsEntryPoint_NEW_CHAT_LIST                       BotMetricsEntryPoint = 56
+	BotMetricsEntryPoint_CONTACTS_TAB                        BotMetricsEntryPoint = 57
 )
 
 // Enum value maps for BotMetricsEntryPoint.
@@ -128,6 +129,7 @@ var (
 		54: "GROUP_MEMBER",
 		55: "CHATLIST_SEARCH",
 		56: "NEW_CHAT_LIST",
+		57: "CONTACTS_TAB",
 	}
 	BotMetricsEntryPoint_value = map[string]int32{
 		"UNDEFINED_ENTRY_POINT":               0,
@@ -178,6 +180,7 @@ var (
 		"GROUP_MEMBER":                        54,
 		"CHATLIST_SEARCH":                     55,
 		"NEW_CHAT_LIST":                       56,
+		"CONTACTS_TAB":                        57,
 	}
 )
 
@@ -1330,6 +1333,9 @@ const (
 	BotCapabilityMetadata_AI_RICH_RESPONSE_MAPS_V2_ENABLED           BotCapabilityMetadata_BotCapabilityType = 64
 	BotCapabilityMetadata_AI_SUBSCRIPTION_METERING_ENABLED           BotCapabilityMetadata_BotCapabilityType = 65
 	BotCapabilityMetadata_RICH_RESPONSE_SPORTS_WIDGET_ENABLED        BotCapabilityMetadata_BotCapabilityType = 66
+	BotCapabilityMetadata_AI_RICH_RESPONSE_ARTIFACTS_ENABLED         BotCapabilityMetadata_BotCapabilityType = 67
+	BotCapabilityMetadata_AI_RICH_RESPONSE_EMAIL_CALENDAR_ENABLED    BotCapabilityMetadata_BotCapabilityType = 68
+	BotCapabilityMetadata_AI_RICH_RESPONSE_REMINDERS_ENABLED         BotCapabilityMetadata_BotCapabilityType = 69
 )
 
 // Enum value maps for BotCapabilityMetadata_BotCapabilityType.
@@ -1402,6 +1408,9 @@ var (
 		64: "AI_RICH_RESPONSE_MAPS_V2_ENABLED",
 		65: "AI_SUBSCRIPTION_METERING_ENABLED",
 		66: "RICH_RESPONSE_SPORTS_WIDGET_ENABLED",
+		67: "AI_RICH_RESPONSE_ARTIFACTS_ENABLED",
+		68: "AI_RICH_RESPONSE_EMAIL_CALENDAR_ENABLED",
+		69: "AI_RICH_RESPONSE_REMINDERS_ENABLED",
 	}
 	BotCapabilityMetadata_BotCapabilityType_value = map[string]int32{
 		"UNKNOWN":                                    0,
@@ -1471,6 +1480,9 @@ var (
 		"AI_RICH_RESPONSE_MAPS_V2_ENABLED":           64,
 		"AI_SUBSCRIPTION_METERING_ENABLED":           65,
 		"RICH_RESPONSE_SPORTS_WIDGET_ENABLED":        66,
+		"AI_RICH_RESPONSE_ARTIFACTS_ENABLED":         67,
+		"AI_RICH_RESPONSE_EMAIL_CALENDAR_ENABLED":    68,
+		"AI_RICH_RESPONSE_REMINDERS_ENABLED":         69,
 	}
 )
 
@@ -7550,9 +7562,9 @@ const file_waAICommon_WAWebProtobufsAICommon_proto_rawDesc = "" +
 	"\aUNKNOWN\x10\x00\x12\v\n" +
 	"\aPLANNED\x10\x01\x12\r\n" +
 	"\tEXECUTING\x10\x02\x12\f\n" +
-	"\bFINISHED\x10\x03\"\xce\x12\n" +
+	"\bFINISHED\x10\x03\"\xcb\x13\n" +
 	"\x15BotCapabilityMetadata\x12c\n" +
-	"\fcapabilities\x18\x01 \x03(\x0e2?.WAWebProtobufsAICommon.BotCapabilityMetadata.BotCapabilityTypeR\fcapabilities\"\xcf\x11\n" +
+	"\fcapabilities\x18\x01 \x03(\x0e2?.WAWebProtobufsAICommon.BotCapabilityMetadata.BotCapabilityTypeR\fcapabilities\"\xcc\x12\n" +
 	"\x11BotCapabilityType\x12\v\n" +
 	"\aUNKNOWN\x10\x00\x12\x16\n" +
 	"\x12PROGRESS_INDICATOR\x10\x01\x12\x19\n" +
@@ -7622,7 +7634,10 @@ const file_waAICommon_WAWebProtobufsAICommon_proto_rawDesc = "" +
 	"'UNIFIED_RESPONSE_MARKDOWN_LINKS_ENABLED\x10?\x12$\n" +
 	" AI_RICH_RESPONSE_MAPS_V2_ENABLED\x10@\x12$\n" +
 	" AI_SUBSCRIPTION_METERING_ENABLED\x10A\x12'\n" +
-	"#RICH_RESPONSE_SPORTS_WIDGET_ENABLED\x10B\"\xd8\x01\n" +
+	"#RICH_RESPONSE_SPORTS_WIDGET_ENABLED\x10B\x12&\n" +
+	"\"AI_RICH_RESPONSE_ARTIFACTS_ENABLED\x10C\x12+\n" +
+	"'AI_RICH_RESPONSE_EMAIL_CALENDAR_ENABLED\x10D\x12&\n" +
+	"\"AI_RICH_RESPONSE_REMINDERS_ENABLED\x10E\"\xd8\x01\n" +
 	"\x18BotModeSelectionMetadata\x12Y\n" +
 	"\x04mode\x18\x01 \x03(\x0e2E.WAWebProtobufsAICommon.BotModeSelectionMetadata.BotUserSelectionModeR\x04mode\x12\"\n" +
 	"\foverrideMode\x18\x02 \x03(\rR\foverrideMode\"=\n" +
@@ -8024,7 +8039,7 @@ const file_waAICommon_WAWebProtobufsAICommon_proto_rawDesc = "" +
 	"\fiptcMetadata\x18\x02 \x01(\v2-.WAWebProtobufsAICommon.AIProvenance.MetadataR\fiptcMetadata\x1a`\n" +
 	"\bMetadata\x12*\n" +
 	"\x10createdWithGenAi\x18\x01 \x01(\bR\x10createdWithGenAi\x12(\n" +
-	"\x0feditedWithGenAi\x18\x02 \x01(\bR\x0feditedWithGenAi*\x8e\n" +
+	"\x0feditedWithGenAi\x18\x02 \x01(\bR\x0feditedWithGenAi*\xa0\n" +
 	"\n" +
 	"\x14BotMetricsEntryPoint\x12\x19\n" +
 	"\x15UNDEFINED_ENTRY_POINT\x10\x00\x12\v\n" +
@@ -8076,7 +8091,8 @@ const file_waAICommon_WAWebProtobufsAICommon_proto_rawDesc = "" +
 	"\x12WEB_NAVIGATION_BAR\x10/\x12\x10\n" +
 	"\fGROUP_MEMBER\x106\x12\x13\n" +
 	"\x0fCHATLIST_SEARCH\x107\x12\x11\n" +
-	"\rNEW_CHAT_LIST\x108*\xa2\x01\n" +
+	"\rNEW_CHAT_LIST\x108\x12\x10\n" +
+	"\fCONTACTS_TAB\x109*\xa2\x01\n" +
 	"\x1aBotMetricsThreadEntryPoint\x12\x11\n" +
 	"\rAI_TAB_THREAD\x10\x01\x12\x12\n" +
 	"\x0eAI_HOME_THREAD\x10\x02\x12 \n" +
