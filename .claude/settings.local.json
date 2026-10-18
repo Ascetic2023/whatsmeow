@@ -19,7 +19,8 @@
       "Bash(grep -n \"BuildUnavailableMessageRequest\\\\|immediateRequestMessageFromPhone\\\\|view_once\" /e/work/whatsmeow/*.go)",
       "Bash(grep -n \"handleDecryptedMessage\\\\|handleDecryptedArmadillo\" /e/work/whatsmeow/*.go)",
       "Bash(grep -n \"processProtocolParts\" /e/work/whatsmeow/*.go)",
-      "Bash(grep -n \"handleProtocolMessage\" /e/work/whatsmeow/*.go)"
+      "Bash(grep -n \"handleProtocolMessage\" /e/work/whatsmeow/*.go)",
+      "Bash(git merge *)"
     ]
   }
 }
