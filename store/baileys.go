@@ -76,6 +76,32 @@ func (i *baileysInt) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// baileysString accepts a JSON string or a bare JSON number, since some exports
+// serialize string fields (e.g. Phone) as numbers. It always marshals as a string.
+type baileysString string
+
+func (s *baileysString) UnmarshalJSON(data []byte) error {
+	trimmed := strings.TrimSpace(string(data))
+	if trimmed == "" || trimmed == "null" {
+		*s = ""
+		return nil
+	}
+	if trimmed[0] == '"' {
+		var str string
+		if err := json.Unmarshal(data, &str); err != nil {
+			return err
+		}
+		*s = baileysString(str)
+		return nil
+	}
+	var num json.Number
+	if err := json.Unmarshal(data, &num); err != nil {
+		return fmt.Errorf("invalid string or number %s: %w", trimmed, err)
+	}
+	*s = baileysString(num.String())
+	return nil
+}
+
 type baileysKeyPair struct {
 	Private baileysBuffer `json:"private"`
 	Public  baileysBuffer `json:"public"`
@@ -112,7 +138,7 @@ type baileysCreds struct {
 	AdvSecretKey            string              `json:"advSecretKey"`
 	Account                 baileysAccount      `json:"account"`
 	Me                      baileysMe           `json:"me"`
-	Phone                   string              `json:"Phone"`
+	Phone                   baileysString       `json:"Phone"`
 	Platform                string              `json:"platform"`
 	PairingEphemeralKeyPair *baileysKeyPair     `json:"pairingEphemeralKeyPair,omitempty"`
 	PairingCode             string              `json:"pairingCode,omitempty"`
@@ -173,7 +199,7 @@ func ExportBaileysJSON(device *Device) (string, error) {
 			ID:   device.ID.String(),
 			Name: device.PushName,
 		},
-		Phone:      device.ID.User,
+		Phone:      baileysString(device.ID.User),
 		Platform:   device.Platform,
 		Registered: true,
 
@@ -266,7 +292,7 @@ func ImportBaileysJSON(jsonData string) (*Device, error) {
 		}
 		device.ID = &jid
 	} else if creds.Phone != "" {
-		jid := types.JID{User: creds.Phone, Server: types.DefaultUserServer}
+		jid := types.JID{User: string(creds.Phone), Server: types.DefaultUserServer}
 		device.ID = &jid
 	} else {
 		return nil, fmt.Errorf("no device ID: both me.id and Phone are empty")
